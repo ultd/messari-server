@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 
@@ -83,6 +84,15 @@ func GetAssetMetricsHandler(apiKey string) gin.HandlerFunc {
 	}
 }
 
+// AssetAggregateMetrics struct is the response json of GetAssetMetricsAggregateHandler
+type assetAggregateMetrics struct {
+	Tags                 []string `json:"tags,omitempty"`
+	Sector               []string `json:"sector,omitempty"`
+	Volume               float64  `json:"volume,omitempty"`
+	TwentyFourHourChange float64  `json:"24HourChange,omitempty"`
+	MarketCap            float64  `json:"marketcap,omitempty"`
+}
+
 // GetAssetMetricsAggregateHandler func returns a hanlder for getting metrics of an asset using a symbol or a slug
 func GetAssetMetricsAggregateHandler(apiKey string) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
@@ -148,7 +158,37 @@ func GetAssetMetricsAggregateHandler(apiKey string) gin.HandlerFunc {
 			page++
 		}
 
-		ctx.JSON(200, assetMetricsAggregate)
+		allTags := []string{}
+		allSectors := []string{}
+		volume := 0.0
+		marketCap := 0.0
+		twentyFourHourChangeAgg := 0.0
+
+		for _, asset := range assetMetricsAggregate {
+			volume += asset.Metrics.MarketData.VolumeLast24Hours
+			marketCap += asset.Metrics.Marketcap.CurrentMarketcapUsd
+			twentyFourHourChangeAgg += asset.Metrics.MarketData.PercentChangeUsdLast24Hours
+			if asset.Profile.General.Overview.Tags != nil &&
+				*asset.Profile.General.Overview.Tags != "" &&
+				!includesString(allTags, *asset.Profile.General.Overview.Tags) {
+				allTags = append(allTags, *asset.Profile.General.Overview.Tags)
+			}
+			if asset.Profile.General.Overview.Sector != nil &&
+				*asset.Profile.General.Overview.Sector != "" &&
+				!includesString(allSectors, *asset.Profile.General.Overview.Sector) {
+				allSectors = append(allSectors, *asset.Profile.General.Overview.Sector)
+			}
+		}
+
+		agg := &assetAggregateMetrics{
+			Tags:                 allTags,
+			Sector:               allSectors,
+			Volume:               normalizeFloat(volume),
+			MarketCap:            normalizeFloat(marketCap),
+			TwentyFourHourChange: normalizeFloat(twentyFourHourChangeAgg / float64(len(assetMetricsAggregate))),
+		}
+
+		ctx.JSON(200, agg)
 	}
 }
 
@@ -162,4 +202,17 @@ func strPtr(v string) *string {
 
 func boolPtr(v bool) *bool {
 	return &v
+}
+
+func normalizeFloat(v float64) float64 {
+	return math.Round(v*100) / 100
+}
+
+func includesString(v []string, s string) bool {
+	for _, val := range v {
+		if val == s {
+			return true
+		}
+	}
+	return false
 }
